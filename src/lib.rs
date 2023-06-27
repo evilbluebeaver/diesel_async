@@ -112,6 +112,9 @@ pub trait SimpleAsyncConnection {
     /// This function is used to execute migrations,
     /// which may contain more than one SQL statement.
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()>;
+
+    /// Send sql-statement without return expectations
+    fn simple_query_send(&mut self, query: &str);
 }
 
 /// An async connection to a database
@@ -244,7 +247,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
 
         match Self::TransactionManager::transaction_manager_status_mut(self) {
             TransactionManagerStatus::Valid(valid_status) => {
-                assert_eq!(None, valid_status.transaction_depth())
+                assert_eq!(false, valid_status.in_transaction())
             }
             TransactionManagerStatus::InError => panic!("Transaction manager in error"),
         };

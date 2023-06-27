@@ -91,6 +91,10 @@ where
         let conn = self.deref_mut();
         conn.batch_execute(query).await
     }
+    fn simple_query_send(&mut self, query: &str) {
+        let conn = self.deref_mut();
+        conn.simple_query_send(query);
+    }
 }
 
 #[async_trait::async_trait]
@@ -177,6 +181,10 @@ where
 
     async fn rollback_transaction(conn: &mut C) -> diesel::QueryResult<()> {
         TM::rollback_transaction(&mut **conn).await
+    }
+
+    fn rollback_transaction_no_return(conn: &mut C) {
+        TM::rollback_transaction_no_return(&mut **conn)
     }
 
     async fn commit_transaction(conn: &mut C) -> diesel::QueryResult<()> {

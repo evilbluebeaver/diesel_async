@@ -106,6 +106,11 @@ impl SimpleAsyncConnection for AsyncPgConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
         Ok(self.conn.batch_execute(query).await.map_err(ErrorHelper)?)
     }
+    fn simple_query_send(&mut self, query: &str) {
+        self.conn
+            .simple_query_send(query)
+            .expect("batch_execute_no_return failed");
+    }
 }
 
 #[async_trait::async_trait]
@@ -137,13 +142,11 @@ impl AsyncConnection for AsyncPgConnection {
         let conn = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
         let metadata_cache = self.metadata_cache.clone();
-        let tm = self.transaction_state.clone();
         let query = source.as_query();
         Self::with_prepared_statement(
             conn,
             stmt_cache,
             metadata_cache,
-            tm,
             query,
             |conn, stmt, binds| async move {
                 let res = conn.query_raw(&stmt, binds).await.map_err(ErrorHelper)?;
@@ -168,7 +171,6 @@ impl AsyncConnection for AsyncPgConnection {
             self.conn.clone(),
             self.stmt_cache.clone(),
             self.metadata_cache.clone(),
-            self.transaction_state.clone(),
             source,
             |conn, stmt, binds| async move {
                 let binds = binds
@@ -195,23 +197,6 @@ impl AsyncConnection for AsyncPgConnection {
             panic!("Cannot access shared transaction state")
         }
     }
-}
-
-#[inline(always)]
-fn update_transaction_manager_status<T>(
-    query_result: QueryResult<T>,
-    transaction_manager: &mut AnsiTransactionManager,
-) -> QueryResult<T> {
-    if let Err(diesel::result::Error::DatabaseError(
-        diesel::result::DatabaseErrorKind::SerializationFailure,
-        _,
-    )) = query_result
-    {
-        transaction_manager
-            .status
-            .set_top_level_transaction_requires_rollback()
-    }
-    query_result
 }
 
 #[async_trait::async_trait]
@@ -317,7 +302,6 @@ impl AsyncPgConnection {
         raw_connection: Arc<tokio_postgres::Client>,
         stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
         metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
-        tm: Arc<Mutex<AnsiTransactionManager>>,
         query: T,
         callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
     ) -> QueryResult<R>
@@ -407,9 +391,7 @@ impl AsyncPgConnection {
             .zip(bind_collector.binds)
             .map(|(meta, bind)| ToSqlHelper(meta, bind))
             .collect::<Vec<_>>();
-        let res = callback(raw_connection, stmt.clone(), binds).await;
-        let mut tm = tm.lock().await;
-        update_transaction_manager_status(res, &mut tm)
+        callback(raw_connection, stmt.clone(), binds).await
     }
 }
 
