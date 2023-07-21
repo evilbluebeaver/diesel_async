@@ -32,7 +32,6 @@ impl<'token, C: AsyncConnection<TransactionManager = TM>, TM: TransactionManager
 {
     fn drop(&mut self) {
         if self.done {
-            // println!("Nothing to do here");
             return;
         }
         TM::rollback_transaction_no_return(self.conn);
@@ -87,10 +86,9 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
     {
         let mut token = TransactionToken::new(conn);
         Self::begin_transaction(token.conn).await?;
-        match callback(token.conn).await {
+        let result = match callback(token.conn).await {
             Ok(value) => {
                 Self::commit_transaction(token.conn).await?;
-                token.complete();
                 Ok(value)
             }
             Err(user_error) => match Self::rollback_transaction(token.conn).await {
@@ -102,7 +100,9 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
                 }
                 Err(rollback_error) => Err(rollback_error.into()),
             },
-        }
+        };
+        token.complete();
+        result
     }
 
     /// This methods checks if the connection manager is considered to be broken
@@ -281,7 +281,6 @@ where
     }
 
     fn rollback_transaction_no_return(conn: &mut Conn) {
-        println!("rollback_transaction_no_return");
         Self::get_transaction_state(conn)
             .expect("Transaction state")
             .stop_transaction();
